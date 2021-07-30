@@ -132,3 +132,5 @@ dmypy.json
 # 20210728
 *.csv
 
+#
+**/.DS_Store
