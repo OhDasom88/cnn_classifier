@@ -24,11 +24,13 @@ from tensorflow.keras.metrics import binary_accuracy
 from tensorflow.keras.losses import binary_crossentropy
 from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint
 
-filename = './classifing_movie_review_kr/nsmc/ratings_train.txt'
-datastore = pd.read_csv(filename, delimiter='\t')
+# filename = '../movie_review/nsmc/ratings_train.txt'
+# datastore = pd.read_csv(filename, delimiter='\t')
+# filename = '../movie_review/nsmc/ratings_test.txt'
+# test_data = pd.read_csv(filename, delimiter='\t')
 
-filename = './classifing_movie_review_kr/nsmc/ratings_test.txt'
-test_data = pd.read_csv(filename, delimiter='\t')
+datastore = pd.read_csv('./train_spacing.csv')
+test_data = pd.read_csv('./test_spacing.csv')
 
 sentences = datastore.document.values
 labels = datastore.label.values
@@ -45,7 +47,7 @@ word_index = tokenizer.word_index
 sequences = tokenizer.texts_to_sequences(sentences.astype(str))
 sequences_test = tokenizer.texts_to_sequences(test_sentences.astype(str))
 padded = pad_sequences(sequences, maxlen=int(np.quantile(np.array([len(seqs) for seqs in sequences]), 0.9)), padding='post', truncating='post')
-padded_test = pad_sequences(sequences, maxlen=padded.shape[-1], padding='post', truncating='post')
+padded_test = pad_sequences(sequences_test, maxlen=padded.shape[-1], padding='post', truncating='post')
 padded = np.dstack([padded]*2)
 padded_test = np.dstack([padded_test]*2)
 
@@ -74,7 +76,7 @@ for i in range(2,6,1):
     x3.append(x51)
 merged = tf.concat(x3, axis=1)
 x6 = Dense(64, kernel_initializer='glorot_normal')(merged)
-x = layers.Dropout(0.2)(x6)
+x = layers.Dropout(0.5)(x6)
 outputs = Dense(1, activation='sigmoid')(x)
 model = Model(inputs=input1, outputs=outputs)
 
@@ -90,10 +92,10 @@ optimizer = tf.keras.optimizers.Adam(learning_rate=lr_decay)
 model.compile(optimizer= optimizer, loss= binary_crossentropy, metrics=[binary_accuracy])
 []
 
-MODEL_SAVE_FOLDER_PATH = './models_prac'
+MODEL_SAVE_FOLDER_PATH = '../trained_model'
 model_file_path = f'{MODEL_SAVE_FOLDER_PATH}/review_cnn-{{epoch:d}}-{{val_loss:.5f}}-{{val_binary_accuracy:.5f}}.hdf5'
 cb_model_check_point = ModelCheckpoint(filepath=model_file_path, monitor='val_binary_accuracy', verbose=1, save_best_only=True)
-cb_early_stopping = EarlyStopping(monitor='val_loss', patience=10)
+cb_early_stopping = EarlyStopping(monitor='val_loss', patience=6)
 
 model.fit(padded, np.array(labels).reshape(-1,1), epochs=100, validation_split=0.2, batch_size=32
 , callbacks=[cb_model_check_point, cb_early_stopping]
@@ -101,6 +103,7 @@ model.fit(padded, np.array(labels).reshape(-1,1), epochs=100, validation_split=0
 
 
 pred = model.predict(padded_test)
+print(pred)
 score = model.evaluate(padded_test,  np.array(test_labels).reshape(-1,1))
 print(score)
 # try:
