@@ -128,4 +128,9 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
+
+# 20210728
+*.csv
+
+#
 **/.DS_Store
