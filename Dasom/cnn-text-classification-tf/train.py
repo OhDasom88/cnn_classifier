@@ -16,6 +16,7 @@ import fasttext
 from absl import flags, app
 import argparse
 
+
 # Data loading params
 parser = argparse.ArgumentParser(description='Process some integers.')
 
@@ -86,7 +87,7 @@ def preprocess(embedding_model):
     # x= pad_sequences(vocab_processor.texts_to_sequences(x_text), maxlen=max_document_length, padding='post',truncating='post')
     train_x = train_df.document.apply(lambda x: embedding_model.f.tokenize(x))
     train_y = train_df.label
-    # max_document_length = train_x.apply(len).max()
+    max_document_length = train_x.apply(len).max()
     # def tmp(x):
     #     return x
     # train_x.apply(tmp)
@@ -105,7 +106,7 @@ def preprocess(embedding_model):
     x_train, x_dev = x_shuffled[:dev_sample_index], x_shuffled[dev_sample_index:]
     y_train, y_dev = y_shuffled[:dev_sample_index], y_shuffled[dev_sample_index:]
 
-    del x, y, x_shuffled, y_shuffled
+    del x, y, x_shuffled, y_shuffled, max_document_length
 
     # fast text는 vacab size 불필요
     # print("Vocabulary Size: {:d}".format(len(vocab_processor.word_docs)))
@@ -113,11 +114,16 @@ def preprocess(embedding_model):
     # return x_train, y_train, vocab_processor, x_dev, y_dev
     return x_train, y_train, x_dev, y_dev
 
-def train(x_train, y_train, vocab_processor, x_dev, y_dev):
+
+from keras.layers import Conv2D, MaxPool2D
+def train(x_train, y_train, vocab_processor, x_dev, y_dev, max_document_length):
     # Training
     # ==================================================
-    
-
+    pooled_outputs = []
+    for i, filter_size in enumerate(list(map(int, FLAGS.filter_sizes.split(",")))):
+        embedding_size, num_filters = FLAGS.embedding_dim, FLAGS.num_filters
+        filter_shape = [filter_size, embedding_size, 1, num_filters]
+        
 
     with tf.Graph().as_default():
         session_conf = tf.compat.v1.ConfigProto(
@@ -237,9 +243,9 @@ def main(argv=None):
     embedding_model = fasttext.load_model('/content/drive/MyDrive/model/cc.ko.300.bin')# fast text로 진행
 
     # x_train, y_train, vocab_processor, x_dev, y_dev = preprocess()
-    x_train, y_train, x_dev, y_dev = preprocess(embedding_model)
+    x_train, y_train, x_dev, y_dev, max_document_length = preprocess(embedding_model)
     # train(x_train, y_train, vocab_processor, x_dev, y_dev)
-    train(x_train, y_train, embedding_model, x_dev, y_dev)
+    train(x_train, y_train, embedding_model, x_dev, y_dev, max_document_length)
 
 if __name__ == '__main__':
     # app.run()
