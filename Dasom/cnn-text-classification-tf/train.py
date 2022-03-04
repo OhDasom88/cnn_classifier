@@ -10,7 +10,7 @@ from text_cnn import TextCNN
 # from tensorflow.contrib import learn
 from keras.preprocessing.text import Tokenizer
 from keras_preprocessing.sequence import pad_sequences 
-
+import fasttext
 # Parameters
 # ==================================================
 from absl import flags, app
@@ -22,9 +22,11 @@ parser = argparse.ArgumentParser(description='Process some integers.')
 # flags.DEFINE_float("dev_sample_percentage", .1, "Percentage of the training data to use for validation")
 parser.add_argument('--dev_sample_percentage', default=.1, type=float, help='')
 # flags.DEFINE_string("positive_data_file", "./data/rt-polaritydata/rt-polarity.pos", "Data source for the positive data.")
-parser.add_argument('--positive_data_file', default='/content/cnn_classifier/Dasom/cnn-text-classification-tf/data/rt-polaritydata/rt-polarity.pos', type=str, help='')
+# parser.add_argument('--positive_data_file', default='/content/cnn_classifier/Dasom/cnn-text-classification-tf/data/rt-polaritydata/rt-polarity.pos', type=str, help='')
 # flags.DEFINE_string("negative_data_file", "./data/rt-polaritydata/rt-polarity.neg", "Data source for the negative data.")
-parser.add_argument('--negative_data_file', default='/content/cnn_classifier/Dasom/cnn-text-classification-tf/data/rt-polaritydata/rt-polarity.neg', type=str, help='')
+# parser.add_argument('--negative_data_file', default='/content/cnn_classifier/Dasom/cnn-text-classification-tf/data/rt-polaritydata/rt-polarity.neg', type=str, help='')
+parser.add_argument('--train_data_file', default='/content/drive/MyDrive/data/naver_review/ratings_train.txt', type=str, help='')
+parser.add_argument('--test_data_file', default='/content/drive/MyDrive/data/naver_review/ratings_test.txt', type=str, help='')
 
 # Model Hyperparameters
 # flags.DEFINE_integer("embedding_dim", 128, "Dimensionality of character embedding (default: 128)")
@@ -63,28 +65,39 @@ FLAGS = parser.parse_args()
 #     print("{}={}".format(attr.upper(), value))
 # print("")
 
-def preprocess():
+def preprocess(embedding_model):
     # Data Preparation
     # ==================================================
 
     # Load data
     print("Loading data...")
-    x_text, y = data_helpers.load_data_and_labels(FLAGS.positive_data_file, FLAGS.negative_data_file)
+    # x_text, y = data_helpers.load_data_and_labels(FLAGS.positive_data_file, FLAGS.negative_data_file)
+    train_df, test_df = data_helpers.load_data_and_labels(FLAGS.train_data_file, FLAGS.test_data_file)
+
 
     # Build vocabulary
-    max_document_length = max([len(x.split(" ")) for x in x_text])
+    # max_document_length = max([len(x.split(" ")) for x in x_text])
+    # max_document_length = train_df.document.apply(lambda x: len(embedding_model.f.tokenize(x))).max()
     # vocab_processor = learn.preprocessing.VocabularyProcessor(max_document_length)
-    vocab_processor = Tokenizer()
-    # vocab_processor = learn.preprocessing.VocabularyProcessor(max_document_length)
+    # vocab_processor = Tokenizer()
+    # vocab_processor = learn.preprocessing.V   ocabularyProcessor(max_document_length)
     # x = np.array(list(vocab_processor.fit_transform(x_text)))
-    vocab_processor.fit_on_texts(x_text)
-    x= pad_sequences(vocab_processor.texts_to_sequences(x_text), maxlen=max_document_length, padding='post',truncating='post')
+    # vocab_processor.fit_on_texts(x_text)
+    # x= pad_sequences(vocab_processor.texts_to_sequences(x_text), maxlen=max_document_length, padding='post',truncating='post')
+    train_x = train_df.document.apply(lambda x: embedding_model.f.tokenize(x))
+    train_y = train_df.label
+    # max_document_length = train_x.apply(len).max()
+    # def tmp(x):
+    #     return x
+    # train_x.apply(tmp)
 
     # Randomly shuffle data
     np.random.seed(10)
     shuffle_indices = np.random.permutation(np.arange(len(y)))
-    x_shuffled = x[shuffle_indices]
-    y_shuffled = y[shuffle_indices]
+    # x_shuffled = x[shuffle_indices]
+    # y_shuffled = y[shuffle_indices]
+    x_shuffled = train_x[shuffle_indices]
+    y_shuffled = train_y[shuffle_indices]
 
     # Split train/test set
     # TODO: This is very crude, should use cross-validation
@@ -94,13 +107,17 @@ def preprocess():
 
     del x, y, x_shuffled, y_shuffled
 
-    print("Vocabulary Size: {:d}".format(len(vocab_processor.word_docs)))
+    # fast text는 vacab size 불필요
+    # print("Vocabulary Size: {:d}".format(len(vocab_processor.word_docs)))
     print("Train/Dev split: {:d}/{:d}".format(len(y_train), len(y_dev)))
-    return x_train, y_train, vocab_processor, x_dev, y_dev
+    # return x_train, y_train, vocab_processor, x_dev, y_dev
+    return x_train, y_train, x_dev, y_dev
 
 def train(x_train, y_train, vocab_processor, x_dev, y_dev):
     # Training
     # ==================================================
+    
+
 
     with tf.Graph().as_default():
         session_conf = tf.compat.v1.ConfigProto(
@@ -216,8 +233,13 @@ def train(x_train, y_train, vocab_processor, x_dev, y_dev):
                     print("Saved model checkpoint to {}\n".format(path))
 
 def main(argv=None):
-    x_train, y_train, vocab_processor, x_dev, y_dev = preprocess()
-    train(x_train, y_train, vocab_processor, x_dev, y_dev)
+    print("embedding model...")
+    embedding_model = fasttext.load_model('/content/drive/MyDrive/model/cc.ko.300.bin')# fast text로 진행
+
+    # x_train, y_train, vocab_processor, x_dev, y_dev = preprocess()
+    x_train, y_train, x_dev, y_dev = preprocess(embedding_model)
+    # train(x_train, y_train, vocab_processor, x_dev, y_dev)
+    train(x_train, y_train, embedding_model, x_dev, y_dev)
 
 if __name__ == '__main__':
     # app.run()
