@@ -111,7 +111,8 @@ def train(x_train, y_train, vocab_processor, x_dev, y_dev):
             cnn = TextCNN(
                 sequence_length=x_train.shape[1],
                 num_classes=y_train.shape[1],
-                vocab_size=len(vocab_processor.word_docs),
+                # vocab_size=len(vocab_processor.word_docs),
+                tokenizer=vocab_processor,
                 embedding_size=FLAGS.embedding_dim,
                 filter_sizes=list(map(int, FLAGS.filter_sizes.split(","))),
                 num_filters=FLAGS.num_filters,
