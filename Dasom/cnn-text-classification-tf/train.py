@@ -1,5 +1,6 @@
 #! /usr/bin/env python
 
+from jax import custom_gradient
 import tensorflow as tf
 import numpy as np
 import os
@@ -11,11 +12,11 @@ from text_cnn import TextCNN
 from keras.preprocessing.text import Tokenizer
 from keras_preprocessing.sequence import pad_sequences 
 import fasttext
+from konlpy.tag import Mecab
 # Parameters
 # ==================================================
 from absl import flags, app
 import argparse
-
 
 # Data loading params
 parser = argparse.ArgumentParser(description='Process some integers.')
@@ -31,11 +32,13 @@ parser.add_argument('--test_data_file', default='/content/drive/MyDrive/data/nav
 
 # Model Hyperparameters
 # flags.DEFINE_integer("embedding_dim", 128, "Dimensionality of character embedding (default: 128)")
-parser.add_argument('--embedding_dim', default=128, type=int, help='')
+# parser.add_argument('--embedding_dim', default=128, type=int, help='')
+parser.add_argument('--embedding_dim', default=300, type=int, help='')
 # flags.DEFINE_string("filter_sizes", "3,4,5", "Comma-separated filter sizes (default: '3,4,5')")
 parser.add_argument('--filter_sizes', default='3,4,5', type=str, help='')
 # flags.DEFINE_integer("num_filters", 128, "Number of filters per filter size (default: 128)")
-parser.add_argument('--num_filters', default=128, type=int, help='')
+# parser.add_argument('--num_filters', default=128, type=int, help='')
+parser.add_argument('--num_filters', default=100, type=int, help='')
 # flags.DEFINE_float("dropout_keep_prob", 0.5, "Dropout keep probability (default: 0.5)")
 parser.add_argument('--dropout_keep_prob', default=0.5, type=float, help='')
 # flags.DEFINE_float("l2_reg_lambda", 0.0, "L2 regularization lambda (default: 0.0)")
@@ -85,45 +88,88 @@ def preprocess(embedding_model):
     # x = np.array(list(vocab_processor.fit_transform(x_text)))
     # vocab_processor.fit_on_texts(x_text)
     # x= pad_sequences(vocab_processor.texts_to_sequences(x_text), maxlen=max_document_length, padding='post',truncating='post')
-    train_x = train_df.document.apply(lambda x: embedding_model.f.tokenize(x))
+    m = Mecab()
+    train_x = train_df.document.apply(lambda x: embedding_model.f.tokenize(x))# fasttext 모델로만 tokenizing을 하니 하나값으로 뭉치는 경우가 많음
+    # train_x = train_df.document.apply(lambda x: embedding_model.f.tokenize(' '.join(m.morphs(x))))# fasttext 모델로만 tokenizing을 하니 하나값으로 뭉치는 경우가 많음
     train_y = train_df.label
     max_document_length = train_x.apply(len).max()
-    # def tmp(x):
-    #     return x
-    # train_x.apply(tmp)
+    def tmp(x):
+        return x
+    train_x.apply(tmp)
 
     # Randomly shuffle data
     np.random.seed(10)
-    shuffle_indices = np.random.permutation(np.arange(len(y)))
+    shuffle_indices = np.random.permutation(np.arange(train_y.shape[0]))
     # x_shuffled = x[shuffle_indices]
     # y_shuffled = y[shuffle_indices]
-    x_shuffled = train_x[shuffle_indices]
-    y_shuffled = train_y[shuffle_indices]
+    x_shuffled = train_x.iloc[shuffle_indices]
+    y_shuffled = train_y.iloc[shuffle_indices]
 
     # Split train/test set
     # TODO: This is very crude, should use cross-validation
-    dev_sample_index = -1 * int(FLAGS.dev_sample_percentage * float(len(y)))
+    dev_sample_index = -1 * int(FLAGS.dev_sample_percentage * float(train_y.shape[0]))
     x_train, x_dev = x_shuffled[:dev_sample_index], x_shuffled[dev_sample_index:]
     y_train, y_dev = y_shuffled[:dev_sample_index], y_shuffled[dev_sample_index:]
 
-    del x, y, x_shuffled, y_shuffled, max_document_length
+    del train_x, train_y, x_shuffled, y_shuffled
 
     # fast text는 vacab size 불필요
     # print("Vocabulary Size: {:d}".format(len(vocab_processor.word_docs)))
     print("Train/Dev split: {:d}/{:d}".format(len(y_train), len(y_dev)))
     # return x_train, y_train, vocab_processor, x_dev, y_dev
-    return x_train, y_train, x_dev, y_dev
+    return x_train, y_train, x_dev, y_dev, max_document_length
 
 
-from keras.layers import Conv2D, MaxPool2D
-def train(x_train, y_train, vocab_processor, x_dev, y_dev, max_document_length):
+from keras.layers import Conv2D, MaxPool2D, Input, Dropout, Dense
+from keras.regularizers import L2
+from keras.models import Model
+def train(x_train, y_train, vocab_processor, x_dev, y_dev, sequence_length):
     # Training
     # ==================================================
+    embedding_size, num_filters = FLAGS.embedding_dim, FLAGS.num_filters
+    assert embedding_size == vocab_processor.get_dimension()
+
+    inputs = Input(shape=(sequence_length, embedding_size,1))
     pooled_outputs = []
-    for i, filter_size in enumerate(list(map(int, FLAGS.filter_sizes.split(",")))):
-        embedding_size, num_filters = FLAGS.embedding_dim, FLAGS.num_filters
-        filter_shape = [filter_size, embedding_size, 1, num_filters]
-        
+    filter_sizes = list(map(int, FLAGS.filter_sizes.split(",")))
+    for i, filter_size in enumerate(filter_sizes):
+        filter_shape = (filter_size, embedding_size, 1, num_filters)
+        conv = Conv2D(filters=num_filters,
+            # input_shape=(sequence_length,embedding_size,1),#batch_shape + (rows, cols, channels)
+            # kernel_size=filter_shape,
+            kernel_size=(filter_size, embedding_size),
+            kernel_initializer = 'glorot_uniform',
+            # strides=[1,1,1,1], 
+            strides=(1,1), 
+            padding='valid', 
+            use_bias=True, 
+            bias_initializer='zeros',
+            activation='relu',
+            data_format='channels_last',
+        )(inputs)
+        pooled = MaxPool2D(
+            pool_size=(1, sequence_length - filter_size + 1, 1, 1), 
+            strides=(1,1,1,1), 
+            padding='vaild'
+        )(conv)
+        # if `data_format='channels_last'
+        # 4+D tensor with shape: `batch_shape + (new_rows, new_cols, filters)` 
+        pooled_outputs.append(pooled)
+            # Combine all the pooled features
+    num_filters_total = num_filters * len(filter_sizes)
+    h_pool = tf.concat(pooled_outputs, 3)
+    h_pool_flat = tf.reshape(h_pool, [-1, num_filters_total])
+    drop = Dropout(FLAGS.dropout_keep_prob)(h_pool_flat)
+    outputs = Dense(
+        y_train.shape[1],
+        activation='softmax', 
+        kernel_initializer='glorot_uniform', 
+        kernel_regularizer=L2(l2=0.5),
+        use_bias=True,
+        bias_regularizer=L2(l2=0.5),
+    )(drop)
+    custom_model = Model(inputs=inputs, outputs =outputs)
+    custom_model.summary()
 
     with tf.Graph().as_default():
         session_conf = tf.compat.v1.ConfigProto(

@@ -10,34 +10,27 @@ class TextCNN(object):
     Uses an embedding layer, followed by a convolutional, max-pooling and softmax layer.
     """
     def __init__(
-      self, sequence_length, num_classes, tokenizer,#vocab_size,
-      embedding_size, filter_sizes, num_filters, l2_reg_lambda=0.0):
+      self, sequence_length, num_classes, tokenizer, 
+      embedding_size, filter_sizes, num_filters, l2_reg_lambda=0.0,
+      vocab_size=50000,):
 
         # Placeholders for input, output and dropout
-        # self.input_x = tf.placeholder(tf.int32, [None, sequence_length], name="input_x")
-        # self.input_y = tf.placeholder(tf.float32, [None, num_classes], name="input_y")
-        # self.dropout_keep_prob = tf.placeholder(tf.float32, name="dropout_keep_prob")
-        self.input_x = Input(shape=(None, sequence_length))
-        self.input_y = None
-        self.dropout_keep_prob = None
+        self.input_x = tf.placeholder(tf.int32, [None, sequence_length], name="input_x")
+        self.input_y = tf.placeholder(tf.float32, [None, num_classes], name="input_y")
+        self.dropout_keep_prob = tf.placeholder(tf.float32, name="dropout_keep_prob")
         self.tokenizer = tokenizer
 
         # Keeping track of l2 regularization loss (optional)
-        # l2_loss = tf.constant(0.0)
+        l2_loss = tf.constant(0.0)
 
         # Embedding layer
         # input의 값을 embedding 값으로 전환
-        # with tf.device('/cpu:0'), tf.name_scope("embedding"):
-        #     self.W = tf.Variable(
-        #         tf.random_uniform([vocab_size, embedding_size], -1.0, 1.0),
-        #         name="W")
-        #     self.embedded_chars = tf.nn.embedding_lookup(self.W, self.input_x)
-        #     self.embedded_chars_expanded = tf.expand_dims(self.embedded_chars, -1)
-        embedding_model = fasttext.load_model('/content/drive/MyDrive/model/cc.ko.300.bin')# fast text로 진행
-        self.embedded_chars = tf.nn.embedding_lookup(self.W, self.input_x)
-        self.embedded_chars_expanded = tf.expand_dims(self.embedded_chars, -1)
-        # embedding_weights = {idx: embedding_model[word] if word in embedding_model else np.random.uniform(-0.25, 0.25, embedding_model.vector_size) for idx, word in self.tokenizer.index_word.items()}
-        # embedding_model.get_word_vector('금리')
+        with tf.device('/cpu:0'), tf.name_scope("embedding"):
+            self.W = tf.Variable(
+                tf.random_uniform([vocab_size, embedding_size], -1.0, 1.0)
+                , name="W")
+            self.embedded_chars = tf.nn.embedding_lookup(self.W, self.input_x)
+            self.embedded_chars_expanded = tf.expand_dims(self.embedded_chars, -1)
 
         # Create a convolution + maxpool layer for each filter size
         pooled_outputs = []
