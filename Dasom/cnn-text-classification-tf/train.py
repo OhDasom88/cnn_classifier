@@ -123,6 +123,12 @@ def preprocess(embedding_model):
 from keras.layers import Conv2D, MaxPool2D, Input, Dropout, Dense
 from keras.regularizers import L2
 from keras.models import Model
+from keras.optimizers import adam_v2, backend
+from keras.metrics import binary_accuracy, accuracy
+from keras.losses import binary_crossentropy, CategoricalCrossentropy
+from keras.callbacks import EarlyStopping, ModelCheckpoint
+import tensorflow as tf
+
 def train(x_train, y_train, vocab_processor, x_dev, y_dev, sequence_length):
     # Training
     # ==================================================
@@ -148,9 +154,9 @@ def train(x_train, y_train, vocab_processor, x_dev, y_dev, sequence_length):
             data_format='channels_last',
         )(inputs)
         pooled = MaxPool2D(
-            pool_size=(1, sequence_length - filter_size + 1, 1, 1), 
-            strides=(1,1,1,1), 
-            padding='vaild'
+            pool_size=(sequence_length - filter_size + 1, 1), 
+            strides=(1,1), 
+            padding='valid'
         )(conv)
         # if `data_format='channels_last'
         # 4+D tensor with shape: `batch_shape + (new_rows, new_cols, filters)` 
@@ -161,8 +167,8 @@ def train(x_train, y_train, vocab_processor, x_dev, y_dev, sequence_length):
     h_pool_flat = tf.reshape(h_pool, [-1, num_filters_total])
     drop = Dropout(FLAGS.dropout_keep_prob)(h_pool_flat)
     outputs = Dense(
-        y_train.shape[1],
-        activation='softmax', 
+        2,
+        activation='softmax', #이진 분류
         kernel_initializer='glorot_uniform', 
         kernel_regularizer=L2(l2=0.5),
         use_bias=True,
@@ -170,6 +176,37 @@ def train(x_train, y_train, vocab_processor, x_dev, y_dev, sequence_length):
     )(drop)
     custom_model = Model(inputs=inputs, outputs =outputs)
     custom_model.summary()
+
+    learning_rate = 0.001
+    batch_size = 50
+    
+    lr_decay = tf.keras.optimizers.schedules.ExponentialDecay(learning_rate, 
+                                                        len(labels)/batch_size*5, 
+                                                        decay_rate=0.5, 
+                                                        staircase=True)
+    optimizer = adam_v2.Adam(learning_rate=lr_decay)
+
+    custom_model.compile(optimizer= optimizer, loss= CategoricalCrossentropy, metrics=[accuracy])
+
+    MODEL_SAVE_FOLDER_PATH = './models_prac'
+    model_file_path = f'{MODEL_SAVE_FOLDER_PATH}/review_cnn-{{epoch:d}}-{{val_loss:.5f}}-{{val_accuracy:.5f}}.hdf5'
+    cb_model_check_point = ModelCheckpoint(filepath=model_file_path, monitor='val_accuracy', verbose=1, save_best_only=True)
+    cb_early_stopping = EarlyStopping(monitor='val_loss', patience=10)
+
+    # x_train, y_train, x_dev, y_dev
+
+    custom_model.fit(padded, np.array(labels).reshape(-1,1), epochs=100, validation_split=0.2, batch_size=50
+    , callbacks=[cb_model_check_point, cb_early_stopping]
+    )
+
+    del padded
+    del labels
+
+    pred = custom_model.predict(padded_test)
+    score = custom_model.evaluate(pred,  np.array(test_labels).reshape(-1,1))
+    print(score)
+
+
 
     with tf.Graph().as_default():
         session_conf = tf.compat.v1.ConfigProto(
