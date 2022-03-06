@@ -17,6 +17,8 @@ from konlpy.tag import Mecab
 # ==================================================
 from absl import flags, app
 import argparse
+import pandas as pd
+from tqdm import tqdm
 
 # Data loading params
 parser = argparse.ArgumentParser(description='Process some integers.')
@@ -75,10 +77,31 @@ def preprocess(embedding_model):
 
     # Load data
     print("Loading data...")
-    # x_text, y = data_helpers.load_data_and_labels(FLAGS.positive_data_file, FLAGS.negative_data_file)
-    train_df, test_df = data_helpers.load_data_and_labels(FLAGS.train_data_file, FLAGS.test_data_file)
-
-
+ 
+    def iterWithEmbedding(data_type):
+        if data_type == 0:
+            df = pd.read_table(FLAGS.train_data_file).dropna()
+        elif data_type == 1:
+            df = pd.read_table(FLAGS.test_data_file).dropna()
+        pbar = tqdm(total = df.shape[0]+1)
+        for row in df.itertuples():
+            yield np.asarray([embedding_model[token] for token in embedding_model.f.tokenize(row.document)]).astype(np.float32), row.label
+            pbar.update(1)
+        pbar.close()
+        del df
+    train_ds = tf.data.Dataset.from_generator(iterWithEmbedding, args=[0]
+        , output_signature=(
+            tf.TensorSpec(shape=(None,300), dtype=tf.float32),
+            tf.TensorSpec(shape=(), dtype=tf.int32)
+        )
+    ).shuffle(buffer_size=100)
+    test_ds = tf.data.Dataset.from_generator(iterWithEmbedding, args=[1]
+        , output_signature=(
+            tf.TensorSpec(shape=(None,300), dtype=tf.float32),
+            tf.TensorSpec(shape=(), dtype=tf.int32)
+        )
+    ).shuffle(buffer_size=100)
+    return train_ds, test_ds
     # Build vocabulary
     # max_document_length = max([len(x.split(" ")) for x in x_text])
     # max_document_length = train_df.document.apply(lambda x: len(embedding_model.f.tokenize(x))).max()
@@ -88,36 +111,36 @@ def preprocess(embedding_model):
     # x = np.array(list(vocab_processor.fit_transform(x_text)))
     # vocab_processor.fit_on_texts(x_text)
     # x= pad_sequences(vocab_processor.texts_to_sequences(x_text), maxlen=max_document_length, padding='post',truncating='post')
-    m = Mecab()
-    train_x = train_df.document.apply(lambda x: embedding_model.f.tokenize(x))# fasttext 모델로만 tokenizing을 하니 하나값으로 뭉치는 경우가 많음
-    # train_x = train_df.document.apply(lambda x: embedding_model.f.tokenize(' '.join(m.morphs(x))))# fasttext 모델로만 tokenizing을 하니 하나값으로 뭉치는 경우가 많음
-    train_y = train_df.label
-    max_document_length = train_x.apply(len).max()
-    def tmp(x):
-        return x
-    train_x.apply(tmp)
+    # m = Mecab()
+    # train_x = train_df.document.apply(lambda x: embedding_model.f.tokenize(x))# fasttext 모델로만 tokenizing을 하니 하나값으로 뭉치는 경우가 많음
+    # # train_x = train_df.document.apply(lambda x: embedding_model.f.tokenize(' '.join(m.morphs(x))))# fasttext 모델로만 tokenizing을 하니 하나값으로 뭉치는 경우가 많음
+    # train_y = train_df.label
+    # max_document_length = train_x.apply(len).max()
+    # def tmp(x):
+    #     return x
+    # train_x.apply(tmp)
 
-    # Randomly shuffle data
-    np.random.seed(10)
-    shuffle_indices = np.random.permutation(np.arange(train_y.shape[0]))
-    # x_shuffled = x[shuffle_indices]
-    # y_shuffled = y[shuffle_indices]
-    x_shuffled = train_x.iloc[shuffle_indices]
-    y_shuffled = train_y.iloc[shuffle_indices]
+    # # Randomly shuffle data
+    # np.random.seed(10)
+    # shuffle_indices = np.random.permutation(np.arange(train_y.shape[0]))
+    # # x_shuffled = x[shuffle_indices]
+    # # y_shuffled = y[shuffle_indices]
+    # x_shuffled = train_x.iloc[shuffle_indices]
+    # y_shuffled = train_y.iloc[shuffle_indices]
 
-    # Split train/test set
-    # TODO: This is very crude, should use cross-validation
-    dev_sample_index = -1 * int(FLAGS.dev_sample_percentage * float(train_y.shape[0]))
-    x_train, x_dev = x_shuffled[:dev_sample_index], x_shuffled[dev_sample_index:]
-    y_train, y_dev = y_shuffled[:dev_sample_index], y_shuffled[dev_sample_index:]
+    # # Split train/test set
+    # # TODO: This is very crude, should use cross-validation
+    # dev_sample_index = -1 * int(FLAGS.dev_sample_percentage * float(train_y.shape[0]))
+    # x_train, x_dev = x_shuffled[:dev_sample_index], x_shuffled[dev_sample_index:]
+    # y_train, y_dev = y_shuffled[:dev_sample_index], y_shuffled[dev_sample_index:]
 
-    del train_x, train_y, x_shuffled, y_shuffled
+    # del train_x, train_y, x_shuffled, y_shuffled
 
-    # fast text는 vacab size 불필요
-    # print("Vocabulary Size: {:d}".format(len(vocab_processor.word_docs)))
-    print("Train/Dev split: {:d}/{:d}".format(len(y_train), len(y_dev)))
-    # return x_train, y_train, vocab_processor, x_dev, y_dev
-    return x_train, y_train, x_dev, y_dev, max_document_length
+    # # fast text는 vacab size 불필요
+    # # print("Vocabulary Size: {:d}".format(len(vocab_processor.word_docs)))
+    # print("Train/Dev split: {:d}/{:d}".format(len(y_train), len(y_dev)))
+    # # return x_train, y_train, vocab_processor, x_dev, y_dev
+    # return x_train, y_train, x_dev, y_dev, max_document_length
 
 
 from keras.layers import Conv2D, MaxPool2D, Input, Dropout, Dense
@@ -129,13 +152,15 @@ from keras.losses import binary_crossentropy, CategoricalCrossentropy
 from keras.callbacks import EarlyStopping, ModelCheckpoint
 import tensorflow as tf
 
-def train(x_train, y_train, vocab_processor, x_dev, y_dev, sequence_length):
+# def train(x_train, y_train, vocab_processor, x_dev, y_dev, sequence_length):
+def train(train_ds, test_ds, embedding_model):
     # Training
     # ==================================================
     embedding_size, num_filters = FLAGS.embedding_dim, FLAGS.num_filters
-    assert embedding_size == vocab_processor.get_dimension()
+    assert embedding_size == embedding_model.get_dimension()
 
-    inputs = Input(shape=(sequence_length, embedding_size,1))
+    # inputs = Input(shape=(sequence_length, embedding_size,1))
+    inputs = Input(shape=(None, embedding_size,1))# sequence length가 batch 별로 다름
     pooled_outputs = []
     filter_sizes = list(map(int, FLAGS.filter_sizes.split(",")))
     for i, filter_size in enumerate(filter_sizes):
@@ -154,7 +179,8 @@ def train(x_train, y_train, vocab_processor, x_dev, y_dev, sequence_length):
             data_format='channels_last',
         )(inputs)
         pooled = MaxPool2D(
-            pool_size=(sequence_length - filter_size + 1, 1), 
+            # pool_size=(conv.shape[0] - filter_size + 1, 1), 
+            pool_size=(None, 1), 
             strides=(1,1), 
             padding='valid'
         )(conv)
@@ -195,15 +221,12 @@ def train(x_train, y_train, vocab_processor, x_dev, y_dev, sequence_length):
 
     # x_train, y_train, x_dev, y_dev
 
-    custom_model.fit(padded, np.array(labels).reshape(-1,1), epochs=100, validation_split=0.2, batch_size=50
+    custom_model.fit(train_ds, epochs=100, validation_split=0.2, batch_size=50
     , callbacks=[cb_model_check_point, cb_early_stopping]
     )
 
-    del padded
-    del labels
 
-    pred = custom_model.predict(padded_test)
-    score = custom_model.evaluate(pred,  np.array(test_labels).reshape(-1,1))
+    score = custom_model.evaluate(test_ds)
     print(score)
 
 
@@ -326,9 +349,11 @@ def main(argv=None):
     embedding_model = fasttext.load_model('/content/drive/MyDrive/model/cc.ko.300.bin')# fast text로 진행
 
     # x_train, y_train, vocab_processor, x_dev, y_dev = preprocess()
-    x_train, y_train, x_dev, y_dev, max_document_length = preprocess(embedding_model)
+    # x_train, y_train, x_dev, y_dev, max_document_length = preprocess(embedding_model)
+    train_ds, test_ds = preprocess(embedding_model)
     # train(x_train, y_train, vocab_processor, x_dev, y_dev)
-    train(x_train, y_train, embedding_model, x_dev, y_dev, max_document_length)
+    # train(x_train, y_train, embedding_model, x_dev, y_dev, max_document_length)
+    train(train_ds, test_ds, embedding_model)
 
 if __name__ == '__main__':
     # app.run()
