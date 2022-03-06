@@ -216,7 +216,7 @@ def train(train_ds, val_ds, embedding_model):
     custom_model.summary()
 
     learning_rate = 0.001
-    batch_size = 50
+    batch_size = 512# 50은 8% 였음
     
     lr_decay = tf.keras.optimizers.schedules.ExponentialDecay(learning_rate, 
                                                         # len(labels)/batch_size*5, 
@@ -230,8 +230,10 @@ def train(train_ds, val_ds, embedding_model):
 # model_dir
     # MODEL_SAVE_FOLDER_PATH = './models_prac'
     # model_file_path = f'{MODEL_SAVE_FOLDER_PATH}/review_cnn-{{epoch:d}}-{{val_loss:.5f}}-{{val_accuracy:.5f}}.hdf5'
-    model_file_path = f'{FLAGS.model_dir}/review_cnn-{{epoch:d}}-{{val_loss:.5f}}-{{val_accuracy:.5f}}.hdf5'
-    cb_model_check_point = ModelCheckpoint(filepath=model_file_path, monitor='val_accuracy', verbose=1, save_best_only=True)
+    # cb_model_check_point = ModelCheckpoint(filepath=model_file_path, monitor='val_accuracy', verbose=1, save_best_only=True)
+    model_file_path = f'{FLAGS.model_dir}/review_cnn-{{epoch:d}}-{{val_loss:.5f}}-{{val_binary_accuracy:.5f}}.hdf5'
+    # cb_model_check_point = ModelCheckpoint(filepath=model_file_path, monitor='val_accuracy', verbose=1, save_best_only=True)
+    cb_model_check_point = ModelCheckpoint(filepath=model_file_path, monitor='val_binary_accuracy', verbose=1, save_best_only=True)
     cb_early_stopping = EarlyStopping(monitor='val_loss', patience=10)
 
     # x_train, y_train, x_dev, y_dev
