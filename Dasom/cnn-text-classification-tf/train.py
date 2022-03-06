@@ -31,6 +31,7 @@ parser.add_argument('--dev_sample_percentage', default=.1, type=float, help='')
 # parser.add_argument('--negative_data_file', default='/content/cnn_classifier/Dasom/cnn-text-classification-tf/data/rt-polaritydata/rt-polarity.neg', type=str, help='')
 parser.add_argument('--train_data_file', default='/content/drive/MyDrive/data/naver_review/ratings_train.txt', type=str, help='')
 parser.add_argument('--test_data_file', default='/content/drive/MyDrive/data/naver_review/ratings_test.txt', type=str, help='')
+parser.add_argument('--model_dir', default='/content/drive/MyDrive/model/', type=str, help='')
 
 # Model Hyperparameters
 # flags.DEFINE_integer("embedding_dim", 128, "Dimensionality of character embedding (default: 128)")
@@ -77,31 +78,35 @@ def preprocess(embedding_model):
 
     # Load data
     print("Loading data...")
- 
     def iterWithEmbedding(data_type):
         if data_type == 0:
             df = pd.read_table(FLAGS.train_data_file).dropna()
         elif data_type == 1:
             df = pd.read_table(FLAGS.test_data_file).dropna()
-        pbar = tqdm(total = df.shape[0]+1)
+        # pbar = tqdm(total = df.shape[0]+1)
         for row in df.itertuples():
             yield np.asarray([embedding_model[token] for token in embedding_model.f.tokenize(row.document)]).astype(np.float32), row.label
-            pbar.update(1)
-        pbar.close()
+        #     pbar.update(1)
+        # pbar.close()
         del df
     train_ds = tf.data.Dataset.from_generator(iterWithEmbedding, args=[0]
         , output_signature=(
             tf.TensorSpec(shape=(None,300), dtype=tf.float32),
             tf.TensorSpec(shape=(), dtype=tf.int32)
         )
-    ).shuffle(buffer_size=100)
-    test_ds = tf.data.Dataset.from_generator(iterWithEmbedding, args=[1]
+    ).shuffle(buffer_size=100, seed=42)
+    val_ds = tf.data.Dataset.from_generator(iterWithEmbedding, args=[1]
         , output_signature=(
             tf.TensorSpec(shape=(None,300), dtype=tf.float32),
             tf.TensorSpec(shape=(), dtype=tf.int32)
         )
-    ).shuffle(buffer_size=100)
-    return train_ds, test_ds
+    ).shuffle(buffer_size=100, seed=42)
+    # ds_size = pd.read_table(FLAGS.train_data_file).dropna().shape[0]
+    # train_size = int(0.8 * ds_size)
+    # val_size = int(0.2 * ds_size)
+    # val_ds = train_ds.skip(train_size).take(val_size)
+    # train_ds = train_ds.take(train_size)
+    return train_ds, val_ds#, test_ds
     # Build vocabulary
     # max_document_length = max([len(x.split(" ")) for x in x_text])
     # max_document_length = train_df.document.apply(lambda x: len(embedding_model.f.tokenize(x))).max()
@@ -143,7 +148,7 @@ def preprocess(embedding_model):
     # return x_train, y_train, x_dev, y_dev, max_document_length
 
 
-from keras.layers import Conv2D, MaxPool2D, Input, Dropout, Dense
+from keras.layers import Conv2D, MaxPool2D, Input, Dropout, Dense, GlobalMaxPooling2D
 from keras.regularizers import L2
 from keras.models import Model
 from keras.optimizers import adam_v2, backend
@@ -153,7 +158,8 @@ from keras.callbacks import EarlyStopping, ModelCheckpoint
 import tensorflow as tf
 
 # def train(x_train, y_train, vocab_processor, x_dev, y_dev, sequence_length):
-def train(train_ds, test_ds, embedding_model):
+# def train(train_ds, val_ds, test_ds, embedding_model):
+def train(train_ds, val_ds, embedding_model):
     # Training
     # ==================================================
     embedding_size, num_filters = FLAGS.embedding_dim, FLAGS.num_filters
@@ -164,7 +170,7 @@ def train(train_ds, test_ds, embedding_model):
     pooled_outputs = []
     filter_sizes = list(map(int, FLAGS.filter_sizes.split(",")))
     for i, filter_size in enumerate(filter_sizes):
-        filter_shape = (filter_size, embedding_size, 1, num_filters)
+        # filter_shape = (filter_size, embedding_size, 1, num_filters)
         conv = Conv2D(filters=num_filters,
             # input_shape=(sequence_length,embedding_size,1),#batch_shape + (rows, cols, channels)
             # kernel_size=filter_shape,
@@ -178,12 +184,17 @@ def train(train_ds, test_ds, embedding_model):
             activation='relu',
             data_format='channels_last',
         )(inputs)
-        pooled = MaxPool2D(
-            # pool_size=(conv.shape[0] - filter_size + 1, 1), 
-            pool_size=(None, 1), 
-            strides=(1,1), 
-            padding='valid'
-        )(conv)
+        # pooled = MaxPool2D(
+        #     # pool_size=(sequence_length - filter_size + 1, 1), # batch 마다가 다름
+        #     strides=(1,1), 
+        #     padding='valid'
+        # )(conv)
+        # pooled = MaxPool2D(
+        #     # pool_size=(None, 1), 
+        #     strides=(1,1), 
+        #     padding='valid'
+        # )(conv)
+        pooled = GlobalMaxPooling2D(keepdims=True, data_format='channels_last')(conv)
         # if `data_format='channels_last'
         # 4+D tensor with shape: `batch_shape + (new_rows, new_cols, filters)` 
         pooled_outputs.append(pooled)
@@ -193,8 +204,9 @@ def train(train_ds, test_ds, embedding_model):
     h_pool_flat = tf.reshape(h_pool, [-1, num_filters_total])
     drop = Dropout(FLAGS.dropout_keep_prob)(h_pool_flat)
     outputs = Dense(
-        2,
-        activation='softmax', #이진 분류
+        1,
+        # activation='softmax', #이진 분류
+        activation='sigmoid', #이진 분류
         kernel_initializer='glorot_uniform', 
         kernel_regularizer=L2(l2=0.5),
         use_bias=True,
@@ -207,27 +219,31 @@ def train(train_ds, test_ds, embedding_model):
     batch_size = 50
     
     lr_decay = tf.keras.optimizers.schedules.ExponentialDecay(learning_rate, 
-                                                        len(labels)/batch_size*5, 
+                                                        # len(labels)/batch_size*5, 
+                                                        5000, 
                                                         decay_rate=0.5, 
                                                         staircase=True)
     optimizer = adam_v2.Adam(learning_rate=lr_decay)
 
-    custom_model.compile(optimizer= optimizer, loss= CategoricalCrossentropy, metrics=[accuracy])
-
-    MODEL_SAVE_FOLDER_PATH = './models_prac'
-    model_file_path = f'{MODEL_SAVE_FOLDER_PATH}/review_cnn-{{epoch:d}}-{{val_loss:.5f}}-{{val_accuracy:.5f}}.hdf5'
+    # custom_model.compile(optimizer= optimizer, loss= CategoricalCrossentropy, metrics=[accuracy])
+    custom_model.compile(optimizer= optimizer, loss= binary_crossentropy, metrics=[binary_accuracy])
+# model_dir
+    # MODEL_SAVE_FOLDER_PATH = './models_prac'
+    # model_file_path = f'{MODEL_SAVE_FOLDER_PATH}/review_cnn-{{epoch:d}}-{{val_loss:.5f}}-{{val_accuracy:.5f}}.hdf5'
+    model_file_path = f'{FLAGS.model_dir}/review_cnn-{{epoch:d}}-{{val_loss:.5f}}-{{val_accuracy:.5f}}.hdf5'
     cb_model_check_point = ModelCheckpoint(filepath=model_file_path, monitor='val_accuracy', verbose=1, save_best_only=True)
     cb_early_stopping = EarlyStopping(monitor='val_loss', patience=10)
 
     # x_train, y_train, x_dev, y_dev
 
-    custom_model.fit(train_ds, epochs=100, validation_split=0.2, batch_size=50
+    custom_model.fit(train_ds.padded_batch(batch_size), epochs=100#, batch_size=50
+    , validation_data=val_ds.padded_batch(batch_size)
     , callbacks=[cb_model_check_point, cb_early_stopping]
     )
 
 
-    score = custom_model.evaluate(test_ds)
-    print(score)
+    # score = custom_model.evaluate(test_ds.padded_batch(batch_size))
+    # print(score)
 
 
 
@@ -350,10 +366,12 @@ def main(argv=None):
 
     # x_train, y_train, vocab_processor, x_dev, y_dev = preprocess()
     # x_train, y_train, x_dev, y_dev, max_document_length = preprocess(embedding_model)
-    train_ds, test_ds = preprocess(embedding_model)
+    # train_ds, val_ds, test_ds = preprocess(embedding_model)
+    train_ds, val_ds = preprocess(embedding_model)
     # train(x_train, y_train, vocab_processor, x_dev, y_dev)
     # train(x_train, y_train, embedding_model, x_dev, y_dev, max_document_length)
-    train(train_ds, test_ds, embedding_model)
+    # train(train_ds, val_ds, test_ds, embedding_model)
+    train(train_ds, val_ds, embedding_model)
 
 if __name__ == '__main__':
     # app.run()
