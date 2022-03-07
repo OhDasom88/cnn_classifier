@@ -86,6 +86,13 @@ sequence_length = 52
 # we then pad the sequences so they're all the same length (sequence_length)
 X = pad_sequences(X, sequence_length)
 
+import pandas as pd
+from sklearn.model_selection import train_test_split
+
+
+# where there isn't a test set, Kim keeps back 10% of the data for testing, I'm going to do the same since we have an ok amount to play with
+X_train, X_test, y_train, y_test = train_test_split(X, y[:,0], test_size=0.1)
+
 embeddings_index = {}
 f = open(os.path.join('/content/drive/MyDrive/model/w2v', 'glove.6B.200d.txt'))
 for line in tqdm(f):
@@ -96,3 +103,72 @@ for line in tqdm(f):
 f.close()
 
 print('Found %s word vectors.' % len(embeddings_index))
+
+word_index = tokenizer.word_index
+print('Found %s unique tokens.' % len(word_index))
+
+
+num_words = min(max_features, len(word_index)) + 1
+print(num_words)
+
+embedding_dim = 200
+
+# first create a matrix of zeros, this is our embedding matrix
+embedding_matrix = np.zeros((num_words, embedding_dim))
+
+# for each word in out tokenizer lets try to find that work in our w2v model
+for word, i in word_index.items():
+    if i > max_features:
+        continue
+    embedding_vector = embeddings_index.get(word)
+    if embedding_vector is not None:
+        # we found the word - add that words vector to the matrix
+        embedding_matrix[i] = embedding_vector
+    else:
+        # doesn't exist, assign a random vector
+        embedding_matrix[i] = np.random.randn(embedding_dim)
+
+from keras.models import Model
+from keras.layers import Input, Embedding, Conv2D, Reshape, MaxPool2D, Concatenate, Flatten, Dropout, Dense, 
+from keras.initializers import Constant
+from keras import regularizers
+num_filters = 100
+
+inputs_4 = Input(shape=(sequence_length,), dtype='int32')
+embedding_layer_4 = Embedding(num_words,
+                            embedding_dim,
+                            embeddings_initializer=Constant(embedding_matrix),
+                            input_length=sequence_length,
+                            trainable=True)(inputs_4)
+
+reshape_4 = Reshape((sequence_length, embedding_dim, 1))(embedding_layer_4)
+
+conv_0_4 = Conv2D(num_filters, kernel_size=(3, embedding_dim), padding='valid', kernel_initializer='normal', activation='relu', kernel_regularizer=regularizers.l2(3))(reshape_4)
+conv_1_4 = Conv2D(num_filters, kernel_size=(4, embedding_dim), padding='valid', kernel_initializer='normal', activation='relu', kernel_regularizer=regularizers.l2(3))(reshape_4)
+conv_2_4 = Conv2D(num_filters, kernel_size=(5, embedding_dim), padding='valid', kernel_initializer='normal', activation='relu', kernel_regularizer=regularizers.l2(3))(reshape_4)
+
+maxpool_0_4 = MaxPool2D(pool_size=(sequence_length - 3 + 1, 1), strides=(1,1), padding='valid')(conv_0_4)
+maxpool_1_4 = MaxPool2D(pool_size=(sequence_length - 4 + 1, 1), strides=(1,1), padding='valid')(conv_1_4)
+maxpool_2_4 = MaxPool2D(pool_size=(sequence_length - 5 + 1, 1), strides=(1,1), padding='valid')(conv_2_4)
+
+concatenated_tensor_4 = Concatenate(axis=1)([maxpool_0_4, maxpool_1_4, maxpool_2_4])
+flatten_4 = Flatten()(concatenated_tensor_4)
+
+dropout_4 = Dropout(0.5)(flatten_4)
+# note the different activation
+output_4 = Dense(units=1, activation='sigmoid')(dropout_4)
+
+
+model_4 = Model(inputs=inputs_4, outputs=output_4)
+
+# note we're using binary_crossentropy here instead of categorical
+model_4.compile(loss='binary_crossentropy', optimizer='adam', metrics=['accuracy'])
+print(model_4.summary())
+
+batch_size = 32
+history_4 = model_4.fit(X_train, y_train, epochs=30, batch_size=batch_size, verbose=1, validation_split=0.2)
+
+y_hat_4 = model_4.predict(X_test)
+
+from sklearn.metrics import accuracy_score
+print(accuracy_score(y_test, list(map(lambda v: v > 0.5, y_hat_4))))
