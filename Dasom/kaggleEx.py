@@ -129,7 +129,7 @@ for word, i in word_index.items():
         embedding_matrix[i] = np.random.randn(embedding_dim)
 
 from keras.models import Model
-from keras.layers import Input, Embedding, Conv2D, Reshape, MaxPool2D, Concatenate, Flatten, Dropout, Dense, 
+from keras.layers import Input, Embedding, Conv2D, Reshape, MaxPool2D, Concatenate, Flatten, Dropout, Dense
 from keras.initializers import Constant
 from keras import regularizers
 num_filters = 100
