@@ -74,6 +74,8 @@ x_text, y = load_data_and_labels(
 
 
 from keras.preprocessing.text import Tokenizer
+from keras.preprocessing.sequence import pad_sequences
+
 max_features = 20000 # this is the number of words we care about
 tokenizer = Tokenizer(num_words=max_features, split=' ', oov_token='<unw>')
 tokenizer.fit_on_texts(x_text)
