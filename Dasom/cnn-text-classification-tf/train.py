@@ -19,6 +19,8 @@ from absl import flags, app
 import argparse
 import pandas as pd
 from tqdm import tqdm
+from transformers import AutoModel, AutoTokenizer
+import torch
 
 # Data loading params
 parser = argparse.ArgumentParser(description='Process some integers.')
@@ -36,7 +38,8 @@ parser.add_argument('--model_dir', default='/content/drive/MyDrive/model/', type
 # Model Hyperparameters
 # flags.DEFINE_integer("embedding_dim", 128, "Dimensionality of character embedding (default: 128)")
 # parser.add_argument('--embedding_dim', default=128, type=int, help='')
-parser.add_argument('--embedding_dim', default=300, type=int, help='')
+# parser.add_argument('--embedding_dim', default=300, type=int, help='')
+parser.add_argument('--embedding_dim', default=768, type=int, help='')
 # flags.DEFINE_string("filter_sizes", "3,4,5", "Comma-separated filter sizes (default: '3,4,5')")
 parser.add_argument('--filter_sizes', default='3,4,5', type=str, help='')
 # flags.DEFINE_integer("num_filters", 128, "Number of filters per filter size (default: 128)")
@@ -75,7 +78,7 @@ FLAGS = parser.parse_args()
 def preprocess(embedding_model):
     # Data Preparation
     # ==================================================
-
+    
     # Load data
     print("Loading data...")
     def iterWithEmbedding(data_type):
@@ -84,20 +87,24 @@ def preprocess(embedding_model):
         elif data_type == 1:
             df = pd.read_table(FLAGS.test_data_file).dropna()
         # pbar = tqdm(total = df.shape[0]+1)
+        model = AutoModel.from_pretrained("klue/roberta-base").embeddings.word_embeddings
         for row in df.itertuples():
-            yield np.asarray([embedding_model[token] for token in embedding_model.f.tokenize(row.document)]).astype(np.float32), row.label
+            # yield np.asarray([embedding_model[token] for token in embedding_model.f.tokenize(row.document)]).astype(np.float32), row.label
+            yield model.forward(torch.Tensor(embedding_model.encode(df.iloc[4].document)).to(torch.int64)).detach().numpy(), row.label
         #     pbar.update(1)
         # pbar.close()
         del df
     train_ds = tf.data.Dataset.from_generator(iterWithEmbedding, args=[0]
         , output_signature=(
-            tf.TensorSpec(shape=(None,300), dtype=tf.float32),
+            # tf.TensorSpec(shape=(None,300), dtype=tf.float32),
+            tf.TensorSpec(shape=(None,FLAGS.embedding_dim), dtype=tf.float32),
             tf.TensorSpec(shape=(), dtype=tf.int32)
         )
     ).shuffle(buffer_size=100, seed=42)
     val_ds = tf.data.Dataset.from_generator(iterWithEmbedding, args=[1]
         , output_signature=(
-            tf.TensorSpec(shape=(None,300), dtype=tf.float32),
+            # tf.TensorSpec(shape=(None,300), dtype=tf.float32),
+            tf.TensorSpec(shape=(None,FLAGS.embedding_dim), dtype=tf.float32),
             tf.TensorSpec(shape=(), dtype=tf.int32)
         )
     ).shuffle(buffer_size=100, seed=42)
@@ -163,7 +170,7 @@ def train(train_ds, val_ds, embedding_model):
     # Training
     # ==================================================
     embedding_size, num_filters = FLAGS.embedding_dim, FLAGS.num_filters
-    assert embedding_size == embedding_model.get_dimension()
+    # assert embedding_size == embedding_model.get_dimension()
 
     # inputs = Input(shape=(sequence_length, embedding_size,1))
     inputs = Input(shape=(None, embedding_size,1))# sequence length가 batch 별로 다름
@@ -364,7 +371,8 @@ def train(train_ds, val_ds, embedding_model):
 
 def main(argv=None):
     print("embedding model...")
-    embedding_model = fasttext.load_model('/content/drive/MyDrive/model/cc.ko.300.bin')# fast text로 진행
+    # embedding_model = fasttext.load_model('/content/drive/MyDrive/model/cc.ko.300.bin')# fast text로 진행
+    embedding_model = AutoTokenizer.from_pretrained("klue/roberta-base")
 
     # x_train, y_train, vocab_processor, x_dev, y_dev = preprocess()
     # x_train, y_train, x_dev, y_dev, max_document_length = preprocess(embedding_model)
