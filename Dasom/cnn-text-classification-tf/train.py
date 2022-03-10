@@ -81,16 +81,16 @@ def preprocess(embedding_model):
     
     # Load data
     print("Loading data...")
+    model = AutoModel.from_pretrained("klue/roberta-base").embeddings.word_embeddings
     def iterWithEmbedding(data_type):
         if data_type == 0:
             df = pd.read_table(FLAGS.train_data_file).dropna()
         elif data_type == 1:
             df = pd.read_table(FLAGS.test_data_file).dropna()
         # pbar = tqdm(total = df.shape[0]+1)
-        model = AutoModel.from_pretrained("klue/roberta-base").embeddings.word_embeddings
         for row in df.itertuples():
             # yield np.asarray([embedding_model[token] for token in embedding_model.f.tokenize(row.document)]).astype(np.float32), row.label
-            yield model.forward(torch.Tensor(embedding_model.encode(df.iloc[4].document)).to(torch.int64)).detach().numpy(), row.label
+            yield model.forward(torch.Tensor(embedding_model.encode(row.document)).to(torch.int64)).detach().numpy(), row.label
         #     pbar.update(1)
         # pbar.close()
         del df
@@ -221,6 +221,7 @@ def train(train_ds, val_ds, embedding_model):
     )(drop)
     custom_model = Model(inputs=inputs, outputs =outputs)
     custom_model.summary()
+    custom_model.layers[0].trainable = False
 
     learning_rate = 0.001
     batch_size = 512# 50은 8% 였음
