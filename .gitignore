@@ -134,3 +134,6 @@ dmypy.json
 
 #
 **/.DS_Store
+#20220303
+*.npy
+runs/
